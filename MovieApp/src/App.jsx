@@ -1,61 +1,86 @@
-import {useEffect, useState } from 'react'
-import './App.css'
-import Search from './components/Search.jsx'
-// import hero from './assets/hero.png'
+import { useEffect, useState } from 'react';
+import './App.css';
+import Search from './components/Search.jsx';
 
-const API_BASE_URL = 'https://api.themoviedb.org/3/discover/movie'
-const API_KEY= import.meta.env.VITE_TMBD_API_KEY;
+const API_BASE_URL = 'https://api.themoviedb.org/3';
+const API_KEY = import.meta.env.VITE_TMBD_API_KEY;
 
 const API_OPTIONS = {
-  method:'GET',
+  method: 'GET',
   headers: {
-    accept: 'application.json',
-    Authrization: `Bearer ${API_KEY}`
+    accept: 'application/json',
+    Authorization: `Bearer ${API_KEY}`
   }
-}
+};
 
 function App() {
-const [SearchTerm, setSearchTerm] = useState('');
-const [error, setError] = useState('');
- 
-useEffect(() => {
-  const fetchMovies = async () => {
-    try{
+  const [searchTerm, setSearchTerm] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [isLoading, setIsLoading] = useState(false); // Corrected state setter name
+  const [movieList, setMovieList] = useState([]); // Corrected state setter name
 
-    }
-    catch(error){
-      console.log(`Error : ${error}`);
+  const fetchMovies = async () => {
+    setIsLoading(true);
+    setErrorMessage('');
+    try {
+      const endpoint = `${API_BASE_URL}/discover/movie?sort_by=popularity.desc`;
       
+      const response = await fetch(endpoint, API_OPTIONS);
+      
+      if (!response.ok) {
+        throw new Error("Failed to fetch movies. Check your API key and network.");
+      }
+
+      // 1. GET THE DATA FIRST! This line was moved up.
+      const data = await response.json();
+      console.log(data);
+      
+      // 2. NOW you can use the data object.
+      // The incorrect 'if' block for a different API has been removed.
+      setMovieList(data.results || []);
+      
+    } catch (error) {
+      console.error(`Error: ${error}`);
+      setErrorMessage(error.message);
+    } finally {
+      setIsLoading(false);
     }
-  }
-}, [])
+  };
+  
+  useEffect(() => {
+    fetchMovies();
+  }, []);
 
   return (
-  <main>
-    console.log(setSearchTerm);
-    
+    <main>
+      <div className="pattern">
+        <div className="wrapper">
+          <header>
+            <img src='./hero.png' alt="Movie hero banner" />
+            <h1 className='text-4xl'>Find <span className="text-gradient">MOVIES</span> You'll Enjoy Without the Hassle</h1>
+            <Search searchTerm={searchTerm} setSearchTerm={setSearchTerm} />
+          </header>
 
-    <div className="pattern">
-
-      <div className="wrapper">
-        <header>
-          <img src='./hero.png' alt="" />
-          <h1 className='text-4xl'>Find <span className="text-gradient">MOVIES</span> You'll Enjoy Without the Hassle</h1>
-      <Search SearchTerm={SearchTerm} setSearchTerm={setSearchTerm}/>
-        </header>
-
-      <section className='all-movies'>
-        <h2>ALl Movies</h2>
-        
-      </section>
+          <section className='all-movies'>
+            <h2>All Movies</h2>
+            
+            {isLoading ? (
+              <p className='text-white'>Loading...</p>
+            ) : errorMessage ? (
+              <p className='text-red-500'>{errorMessage}</p>
+            ) : (
+              <ul>
+                {movieList.map((movie) => (
+                  // IMPROVEMENT: Added a unique 'key' prop for each movie.
+                  <p key={movie.id} className='text-white'>{movie.title}</p>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
       </div>
-    </div>
-
-  </main>
-  )
+    </main>
+  );
 }
 
-export default App
-
-// eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJkMzRkMzJkMjQ3ZjUyMzdkZTEwNWZmOTRkNTNiN2ExOCIsIm5iZiI6MTc1NjQ5ODc5Ny40NzgwMDAyLCJzdWIiOiI2OGIyMGI2ZDc0ZjYwYjQzN2YyMDAxMTUiLCJzY29wZXMiOlsiYXBpX3JlYWQiXSwidmVyc2lvbiI6MX0.Ov8arJcnQOJesHaNwRsWu_MwpHZV2HQ8lYmbc1r5u8Y
-// ACCESS TOKEN
+export default App;
