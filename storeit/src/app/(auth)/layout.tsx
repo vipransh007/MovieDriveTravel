@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 import React from 'react';
 
 // This layout component wraps the authentication pages (like login, sign up)
@@ -10,18 +11,14 @@ const AuthLayout = ({ children }: { children: React.ReactNode }) => {
       <section className='hidden min-h-screen w-2/5 flex-col justify-between bg-[#F85A5A] p-12 text-white md:flex'>
         <div>
           {/* Using your Logo.svg from the public folder */}
-          <img 
-            src="/Logo.svg" 
-            alt="StoreIt Logo" 
-            className="h-12 w-auto" // Adjusted size for better visuals
-          />
+          <img src="/Logo.svg" alt="StoreIt Logo" className="h-12 w-auto" />
           
           <div className='mt-16'>
             <h1 className='text-4xl font-extrabold leading-tight'>
               Manage your files <br /> the best way
             </h1>
             <p className='mt-4 text-lg text-white/90'>
-              Awesome, we've created the perfect place for you to store all your documents.
+              Awesome, we have created the perfect place for you to store all your documents.
             </p>
           </div>
         </div>
