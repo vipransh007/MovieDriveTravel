@@ -1,13 +1,18 @@
 "use server";
 
-import { Account, Client, ID, Query } from "node-appwrite";
+// FIXED: Added 'Databases' to the import list
+import { Account, Client, Databases, ID, Query } from "node-appwrite";
 import { createAdminClient } from "../appwrite";
 import { appwriteConfig } from "../appwrite/config";
 import { cookies } from "next/headers";
 
+const client = new Client().setEndpoint(appwriteConfig.endpointUrl)
+        .setProject(appwriteConfig.projectId);
+
+
 const sessionCookieName = `a_session_${appwriteConfig.projectId}`;
 
-export const handleError = (error: unknown, contextMessage: string) => {
+export const handleError = async (error: unknown, contextMessage: string) => {
     console.error(contextMessage, error);
     throw error;
 };
@@ -27,7 +32,47 @@ const getUserByEmail = async (email: string) => {
     }
 };
 
-export const createAccount = async ({ fullName, email, password }: { fullName: string; email: string; password: string }) => {
+export const ensureUserDocument = async ({
+    userId,
+    email,
+    fullName,
+}: {
+    userId: string;
+    email: string;
+    fullName?: string;
+}) => {
+    try {
+        const { databases } = await createAdminClient();
+
+        const existing = await databases.listDocuments(
+            appwriteConfig.databaseId,
+            appwriteConfig.userCollectionId,
+            [Query.equal("email", email)]
+        );
+
+        if (existing.total > 0) {
+            return { accountId: existing.documents[0].$id };
+        }
+
+        await databases.createDocument(
+            appwriteConfig.databaseId,
+            appwriteConfig.userCollectionId,
+            userId,
+            {
+                fullName: fullName ?? "",
+                email,
+                avatar: "",
+                accountId: userId,
+            }
+        );
+
+        return { accountId: userId };
+    } catch (error) {
+        handleError(error, "Failed to ensure user document");
+    }
+};
+
+export const createAccount = async ({ fullName, email, password }: { fullName: string; email: string; password: string; }) => {
     try {
         const existingUser = await getUserByEmail(email);
         if (existingUser) {
@@ -41,7 +86,7 @@ export const createAccount = async ({ fullName, email, password }: { fullName: s
         await databases.createDocument(
             appwriteConfig.databaseId,
             appwriteConfig.userCollectionId,
-            accountId,
+            accountId, // Using the same ID is great practice!
             {
                 fullName,
                 email,
@@ -50,21 +95,40 @@ export const createAccount = async ({ fullName, email, password }: { fullName: s
             }
         );
 
+        // After creating the account, we can immediately sign them in.
+        const session = await account.createEmailPasswordSession(email, password);
+        (await cookies()).set(sessionCookieName, session.secret, {
+            path: "/",
+            httpOnly: true,
+            sameSite: "strict",
+            secure: true,
+        });
+
         return JSON.stringify({ accountId });
     } catch (error) {
         handleError(error, "Failed to create account");
     }
 };
 
-export const signIn = async ({ email, password }: { email: string; password: string }) => {
+export const signIn = async ({ email, password }: { email: string; password: string; }) => {
     try {
-        const client = new Client()
-            .setEndpoint(appwriteConfig.endpointUrl)
-            .setProject(appwriteConfig.projectId);
-        const account = new Account(client);
-        const session = await account.createSession(email, password);
-        (await cookies()).set(sessionCookieName, session.secret);
-        return JSON.stringify({ session });
+        // NOTE: It's better to use the admin client for consistency, but this works too.
+        const { account } = await createAdminClient();
+
+        // FIXED: Using the new, recommended method for email/password sessions.
+        const session = await account.createEmailPasswordSession(email, password);
+
+        // FIXED: cookies().set() should not be awaited. Added security options.
+        (await
+            // FIXED: cookies().set() should not be awaited. Added security options.
+            cookies()).set(sessionCookieName, session.secret, {
+            path: "/",
+            httpOnly: true,
+            sameSite: "strict",
+            secure: true,
+        });
+
+        return JSON.stringify(session);
     } catch (error) {
         handleError(error, "Failed to sign in");
     }

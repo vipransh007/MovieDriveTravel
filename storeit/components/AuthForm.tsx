@@ -1,7 +1,7 @@
 "use client"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useForm } from "react-hook-form"
-import { z } from "zod"
+import { set, z } from "zod"
 import { Button } from "@/components/ui/button"
 import {
     Form,
@@ -14,14 +14,14 @@ import {
 import { Input } from "@/components/ui/input"
 import { Loader2 } from "lucide-react"
 import React, { useState } from "react"
-import { createAccount, signIn } from "@/lib/actions/user.actions"
+import { Client, Account, ID } from "appwrite"
+import { appwriteConfig } from "@/lib/appwrite/config"
+import { ensureUserDocument } from "@/lib/actions/user.actions"
 
 
-// FIXED: Updated schema to be more realistic for both types
+// Email OTP: only email (and optional fullName for sign-up UI)
 const authSchema = (type: 'sign-in' | 'sign-up') => z.object({
     email: z.string().email("Invalid email address."),
-    password: z.string().min(8, "Password must be at least 8 characters."),
-    // Only require fullName for sign-up
     ...(type === 'sign-up' && {
         fullName: z.string().min(3, "Full name must be at least 3 characters."),
     })
@@ -33,46 +33,63 @@ const AuthForm = ({ type }: { type: FormType }) => {
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const currentSchema = authSchema(type);
+    const [phase, setPhase] = useState<"request" | "verify">("request")
+    const [otpCode, setOtpCode] = useState("")
+    const [otpUserId, setOtpUserId] = useState<string | null>(null)
 
     const form = useForm<z.infer<typeof currentSchema>>({
         resolver: zodResolver(currentSchema),
         defaultValues: {
             fullName: "",
             email: "",
-            password: "",
         },
     })
 
-    // FIXED: Rewritten submit handler for robustness
-    const onSubmit = async (values: z.infer<typeof currentSchema>) => {
-        setIsLoading(true);
-        setError(null);
+    // Email OTP flow: request -> verify
+   const onSubmit = async (values: z.infer<typeof currentSchema>) => {
+    setIsLoading(true);
+    setError(null);
 
-        try {
-            if (type === 'sign-up') {
-                // Sign up a new user
-                const newUser = await createAccount({
-                    fullName: values.fullName!, // The '!' asserts it exists, as it's required for sign-up
-                    email: values.email,
-                    password: values.password // Pass password if your action needs it
-                });
-                // Handle successful sign-up (e.g., redirect)
+    try {
+        const client = new Client()
+            .setEndpoint(appwriteConfig.endpointUrl)
+            .setProject(appwriteConfig.projectId)
+        const account = new Account(client)
+
+        if (phase === "request") {
+            const token = await account.createEmailToken(ID.unique(), values.email)
+            setOtpUserId(token.userId)
+            setPhase("verify")
+        } else {
+            if (!otpCode) throw new Error("Enter the code sent to your email.")
+            if (!otpUserId) throw new Error("Missing user. Please request a new code.")
+
+            // If a session already exists, skip creating a new one
+            const currentUser = await account.get().catch(() => null)
+            if (!currentUser) {
+                try {
+                    await account.createSession(otpUserId, otpCode)
+                } catch (e: any) {
+                    const message = typeof e?.message === 'string' ? e.message : ''
+                    if (!message.includes('session is active')) {
+                        throw e
+                    }
+                }
             }
 
-            if (type === 'sign-in') {
-                // Sign in an existing user
-                const response = await signIn({ email: values.email, password: values.password });
-                // Handle successful sign-in
-            }
-
-        } catch (error) {
-            setError(error instanceof Error ? error.message : "An error occurred");
-            // Handle errors (e.g., show a toast notification)
-        } finally {
-            // CRITICAL: Ensure loading state is always reset
-            setIsLoading(false);
+            // Ensure a corresponding user document exists in Appwrite Database
+            await ensureUserDocument({ userId: otpUserId, email: values.email, fullName: (values as any).fullName })
+            // Optionally navigate or refresh here
         }
+
+    } catch (error) {
+        console.error(error);
+        
+        setError(error instanceof Error ? error.message : "Something went wrong")
+    } finally {
+        setIsLoading(false);
     }
+};
 
     return (
         <div className="w-full max-w-md p-4">
@@ -92,8 +109,9 @@ const AuthForm = ({ type }: { type: FormType }) => {
                                     <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-2">
                                         <FormLabel className="text-xs text-gray-500">Full name</FormLabel>
                                         <FormControl>
-                                            <Input    placeholder="Enter your full name"
+                                            <Input placeholder="Enter your full name"
                                                 {...field}
+                                                value={typeof field.value === 'string' ? field.value : ''}
                                                 className="border-none bg-transparent p-0 text-base shadow-none focus-visible:ring-0"
                                             >
                                             </Input>
@@ -117,7 +135,9 @@ const AuthForm = ({ type }: { type: FormType }) => {
                                         <Input
                                             placeholder="Enter your email"
                                             {...field}
+                                            value={typeof field.value === 'string' ? field.value : ''}
                                             className="border-none bg-transparent p-0 text-base shadow-none focus-visible:ring-0"
+                                            disabled={phase === "verify"}
                                         />
                                     </FormControl>
                                 </div>
@@ -126,28 +146,20 @@ const AuthForm = ({ type }: { type: FormType }) => {
                         )}
                     />
 
-                    {/* Password Field (always visible) */}
-                    <FormField
-                        control={form.control}
-                        name="password"
-                        render={({ field }) => (
-                            <FormItem>
-                                <div className={`rounded-xl border ${form.formState.errors.password ? 'border-red-500' : 'border-gray-200'} bg-gray-50 px-4 py-2`}>
-                                    <FormLabel className="text-xs text-gray-500">Password</FormLabel>
-                                    <FormControl>
-                                        <Input
-                                            type="password"
-                                            placeholder="Enter your password"
-                                            {...field}
-                                            className="border-none bg-transparent p-0 text-base shadow-none focus-visible:ring-0"
-                                        />
-                                    </FormControl>
-                                </div>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
-
+                    {phase === "verify" && (
+                        <div>
+                            <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-2">
+                                <FormLabel className="text-xs text-gray-500">Verification code</FormLabel>
+                                <Input
+                                    placeholder="Enter the code from your email"
+                                    value={otpCode}
+                                    onChange={(e) => setOtpCode(e.target.value)}
+                                    className="border-none bg-transparent p-0 text-base shadow-none focus-visible:ring-0"
+                                />
+                            </div>
+                            <p className="text-xs text-gray-500 mt-2">We sent a code to your email.</p>
+                        </div>
+                    )}
 
                     <Button
                         className="w-full h-14 bg-[#F85A5A] rounded-full text-lg font-semibold text-white hover:bg-[#E04F4F] transition-colors"
@@ -157,7 +169,7 @@ const AuthForm = ({ type }: { type: FormType }) => {
                         {isLoading ? (
                             <Loader2 className="animate-spin" />
                         ) : (
-                            type === "sign-in" ? "Sign In" : "Create Account"
+                            phase === "verify" ? "Verify Code" : (type === "sign-in" ? "Send Sign In Code" : "Send Sign Up Code")
                         )}
                     </Button>
                 </form>
